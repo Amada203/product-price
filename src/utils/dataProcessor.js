@@ -49,28 +49,17 @@ class DataProcessor {
       return this.generateExamplePredictionData('DEMO_SKU_001', this.generateDateRange(startDate, days));
     }
 
-    const dateRange = this.generateDateRange(startDate, days);
-    const predictionMap = {};
-    
-    // 创建预测数据映射
-    predictionData.forEach(item => {
-      const date = item.prediction_date || item.date;
-      const probability = item.prediction_probability || item.probability || 0;
-      if (date) {
-        predictionMap[date] = probability;
-        console.log(`映射预测数据: ${date} -> ${probability}`);
-      }
-    });
-
-    const result = dateRange.map(date => {
-      const probability = predictionMap[date] || 0;
-      console.log(`日期 ${date} 的预测概率: ${probability}`);
+    // 直接使用预测数据，按 target_date 分组
+    const result = predictionData.map(item => {
+      const date = item.target_date; // 使用 target_date 作为预测日期
+      const probability = parseFloat(item.prediction_probability || item.probability || 0);
+      console.log(`处理预测数据: ${date} -> ${probability}`);
       return {
         date,
         probability: probability,
         label: probability > 0.5 ? '上涨' : '下跌'
       };
-    });
+    }).filter(item => item.date); // 过滤掉没有日期的数据
 
     console.log('生成的每日预测数据:', result);
     return result;
@@ -84,7 +73,6 @@ class DataProcessor {
    */
   generateExamplePredictionData(skuId, dateRange) {
     const result = [];
-    const predictionDate = new Date(dateRange[0]);
     
     dateRange.forEach((date, index) => {
       const probability = 0.3 + Math.random() * 0.4; // 0.3 到 0.7 之间
@@ -153,16 +141,17 @@ class DataProcessor {
    * @param {Array} predictionData - 预测数据
    * @param {Array} futurePriceData - 未来价格数据
    * @param {Array} historicalPriceData - 历史价格数据
+   * @param {number} changeThreshold - 变动阈值，默认0.05 (5%)
    * @returns {Array} 标签对比数据
    */
-  generateLabelComparisonData(predictionData, futurePriceData, historicalPriceData) {
+  generateLabelComparisonData(predictionData, futurePriceData, historicalPriceData, changeThreshold = 0.05) {
     console.log('生成标签对比数据:', { 
       predictionData: predictionData?.length, 
       futurePriceData: futurePriceData?.length,
       historicalPriceData: historicalPriceData?.length 
     });
 
-    if (!predictionData || predictionData.length === 0) {
+    if (!Array.isArray(predictionData) || predictionData.length === 0) {
       console.log('预测数据为空，返回空数组');
       return [];
     }
@@ -171,19 +160,19 @@ class DataProcessor {
     const priceMap = {};
     
     // 添加历史价格数据
-    if (historicalPriceData && historicalPriceData.length > 0) {
+    if (Array.isArray(historicalPriceData) && historicalPriceData.length > 0) {
       historicalPriceData.forEach(item => {
-        if (item.date && item.price !== undefined) {
-          priceMap[item.date] = item.price;
+        if (item && item.date && item.price !== undefined) {
+          priceMap[item.date] = parseFloat(item.price);
         }
       });
     }
     
     // 添加未来价格数据
-    if (futurePriceData && futurePriceData.length > 0) {
+    if (Array.isArray(futurePriceData) && futurePriceData.length > 0) {
       futurePriceData.forEach(item => {
-        if (item.date && item.price !== undefined) {
-          priceMap[item.date] = item.price;
+        if (item && item.date && item.price !== undefined) {
+          priceMap[item.date] = parseFloat(item.price);
         }
       });
     }
@@ -193,8 +182,10 @@ class DataProcessor {
     const result = [];
     
     predictionData.forEach(prediction => {
-      const targetDate = prediction.prediction_date || prediction.date;
-      const probability = prediction.prediction_probability || prediction.probability || 0;
+      if (!prediction) return;
+      
+      const targetDate = prediction.target_date; // 使用正确的字段名
+      const probability = parseFloat(prediction.prediction_probability || 0); // 使用正确的字段名
       
       if (!targetDate) {
         console.log('跳过无日期的预测数据:', prediction);
@@ -216,9 +207,10 @@ class DataProcessor {
       let actualLabel = null;
       let actualPriceChange = 0;
       
-      if (actualPrice !== undefined && prevPrice !== undefined) {
-        actualPriceChange = ((actualPrice - prevPrice) / prevPrice) * 100;
-        actualLabel = actualPriceChange > 0 ? 1 : 0; // 1表示上涨，0表示下跌
+      if (actualPrice !== undefined && prevPrice !== undefined && !isNaN(actualPrice) && !isNaN(prevPrice)) {
+        actualPriceChange = ((actualPrice - prevPrice) / prevPrice);
+        // 使用变动阈值判断：如果价格变动的绝对值超过阈值，则标记为"变动"(1)，否则为"不变动"(0)
+        actualLabel = Math.abs(actualPriceChange) > changeThreshold ? 1 : 0;
       }
       
       const isCorrect = actualLabel !== null ? (predictedLabel === actualLabel) : null;
@@ -237,7 +229,7 @@ class DataProcessor {
         date: targetDate,
         predictedLabel: predictedLabel,
         actualLabel: actualLabel !== null ? actualLabel : 'N/A',
-        isCorrect: isCorrect,
+        isCorrect: isCorrect, // 保持null值，不强制转换为false
         probability: probability,
         actualPrice: actualPrice !== undefined ? actualPrice : null,
         actualPriceChange: actualPriceChange
@@ -341,32 +333,40 @@ class DataProcessor {
    * @param {Array} predictions - 预测数据
    * @param {Array} historical - 历史价格数据
    * @param {Array} future - 未来价格数据
+   * @param {number} changeThreshold - 变动阈值，默认0.05 (5%)
    * @returns {Object} 处理后的所有数据
    */
-  processData(predictions, historical, future) {
+  processData(predictions, historical, future, changeThreshold = 0.05) {
     console.log('开始处理数据:', { 
       predictions: predictions?.length, 
       historical: historical?.length, 
       future: future?.length 
     });
 
-    // 确定日期范围
-    let startDate = '2025-08-28';
-    let days = 3;
+    // 确定日期范围 - 从预测数据中动态获取
+    let startDate = null;
+    let days = 0;
     
     if (predictions && predictions.length > 0) {
-      const dates = predictions.map(p => p.prediction_date || p.date).filter(Boolean);
+      const dates = predictions.map(p => p.target_date).filter(Boolean);
       if (dates.length > 0) {
-        startDate = dates.sort()[0];
-        days = dates.length;
+        const sortedDates = dates.sort();
+        startDate = sortedDates[0];
+        days = sortedDates.length;
       }
+    }
+    
+    // 如果没有预测数据，使用默认值
+    if (!startDate) {
+      startDate = new Date().toISOString().split('T')[0];
+      days = 1;
     }
 
     // 生成每日预测数据
     const dailyPredictionData = this.generateDailyPredictionData(predictions, startDate, days);
     
     // 生成标签对比数据
-    const labelComparisonData = this.generateLabelComparisonData(predictions, future, historical);
+    const labelComparisonData = this.generateLabelComparisonData(predictions, future, historical, changeThreshold);
     
     // 计算准确率统计
     const accuracyStats = this.calculateAccuracyStats(labelComparisonData);

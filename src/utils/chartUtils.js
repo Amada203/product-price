@@ -26,13 +26,18 @@ const chartUtils = {
         return null;
       }
       
-      if (typeof chartDom.getBoundingClientRect !== 'function') {
-        console.warn(`Chart container "${elementId}" does not support getBoundingClientRect`);
-        return null;
+      // 安全检查 getBoundingClientRect 方法
+      let rect = null;
+      try {
+        if (typeof chartDom.getBoundingClientRect === 'function') {
+          rect = chartDom.getBoundingClientRect();
+        }
+      } catch (rectError) {
+        console.warn(`getBoundingClientRect failed for "${elementId}":`, rectError);
+        // 继续执行，不阻止图表创建
       }
       
-      const rect = chartDom.getBoundingClientRect();
-      if (!rect || rect.width === 0 || rect.height === 0) {
+      if (rect && (rect.width === 0 || rect.height === 0)) {
         console.warn(`Chart container "${elementId}" has invalid bounding rect`);
         return null;
       }
@@ -193,14 +198,22 @@ const chartUtils = {
   /**
    * 创建去年同期30天价格走势图
    */
-  createLastYearPriceChart(elementId, priceData, predictionData, probabilityThreshold, organizedPriceData = null) {
+  createLastYearPriceChart(elementId, priceData, predictionData = [], probabilityThreshold = 0.5, organizedPriceData = null) {
     const chartInit = this.safeInitChart(elementId);
     if (!chartInit) return null;
     
     const { myChart } = chartInit;
     
     try {
-      const predictionDates = [...new Set(predictionData.map(item => item.target_date))];
+      // 安全处理预测数据
+      if (!Array.isArray(priceData) || priceData.length === 0) {
+        console.warn('Price data is empty or invalid');
+        return null;
+      }
+
+      const predictionDates = predictionData && Array.isArray(predictionData) 
+        ? [...new Set(predictionData.map(item => item.target_date).filter(Boolean))]
+        : [];
       
       let maxDate = new Date();
       if (predictionData && predictionData.length > 0) {
@@ -330,7 +343,7 @@ const chartUtils = {
   /**
    * 创建每日预测概率图表（带概率曲线）
    */
-  createDailyPredictionChart(elementId, predictionData, probabilityThreshold) {
+  createDailyPredictionChart(elementId, predictionData, probabilityThreshold = 0.5) {
     const chartInit = this.safeInitChart(elementId);
     if (!chartInit) return null;
     
@@ -338,7 +351,7 @@ const chartUtils = {
     
     try {
       // 确保 predictionData 存在且有数据
-      if (!predictionData || predictionData.length === 0) {
+      if (!Array.isArray(predictionData) || predictionData.length === 0) {
         console.warn('No prediction data available for daily chart');
         return null;
       }
@@ -466,7 +479,7 @@ const chartUtils = {
             markLine: {
               data: [
                 {
-                  yAxis: probabilityThreshold,
+                  yAxis: probabilityThreshold || 0.5,
                   name: '概率阈值',
                   lineStyle: {
                     color: '#ff4d4f',
@@ -476,7 +489,7 @@ const chartUtils = {
                   label: {
                     show: true,
                     position: 'insideEndTop',
-                    formatter: `阈值: ${(probabilityThreshold * 100).toFixed(0)}%`,
+                    formatter: `阈值: ${((probabilityThreshold || 0.5) * 100).toFixed(0)}%`,
                     backgroundColor: 'rgba(255, 77, 79, 0.9)',
                     color: '#fff',
                     padding: [2, 6],
@@ -501,23 +514,29 @@ const chartUtils = {
   /**
    * 创建预测标签对比图表（带连接线、准确率和缩放功能）
    */
-  createLabelComparisonChart(elementId, comparisonData, accuracy) {
+  createLabelComparisonChart(elementId, comparisonData, accuracy = 0) {
     const chartInit = this.safeInitChart(elementId);
     if (!chartInit) return null;
     
     const { myChart } = chartInit;
     
     try {
+      // 安全处理对比数据
+      if (!Array.isArray(comparisonData) || comparisonData.length === 0) {
+        console.warn('No comparison data available for label chart');
+        return null;
+      }
+
       const predictionLabels = comparisonData.map((item, index) => [
         index,
-        item.predictedLabel === '变动' ? 1 : 0,
-        item.predictedLabel
+        (item.predictedLabel === '变动' || item.predictedLabel === 1) ? 1 : 0,
+        item.predictedLabel === 1 ? '变动' : (item.predictedLabel === 0 ? '不变动' : item.predictedLabel)
       ]);
       
       const actualLabels = comparisonData.map((item, index) => [
         index,
-        item.actualLabel === '变动' ? 1 : 0,
-        item.actualLabel || 'N/A'
+        (item.actualLabel === '变动' || item.actualLabel === 1) ? 1 : 0,
+        item.actualLabel === 1 ? '变动' : (item.actualLabel === 0 ? '不变动' : (item.actualLabel || 'N/A'))
       ]);
       
       const option = {
@@ -568,22 +587,33 @@ const chartUtils = {
         },
         yAxis: {
           type: 'value',
-          min: -0.2,
-          max: 1.2,
-          interval: 1,
+          min: -0.1,
+          max: 1.1,
           axisLabel: {
             show: true,
             formatter: function(value) {
-              if (Math.abs(value - 0) < 0.1) return '不变动';
-              if (Math.abs(value - 1) < 0.1) return '变动';
+              if (value === 0) return '不变';
+              if (value === 1) return '变';
               return '';
             },
             margin: 16,
-            fontSize: 14,
+            fontSize: 12,
             color: '#666'
           },
           axisTick: {
-            show: false
+            show: true,
+            alignWithLabel: true
+          },
+          splitLine: {
+            show: true,
+            lineStyle: {
+              color: '#f0f0f0',
+              type: 'dashed'
+            }
+          },
+          data: [0, 1],
+          axisTick: {
+            show: true
           },
           axisLine: {
             show: true,

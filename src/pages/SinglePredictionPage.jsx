@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import supabaseClient from '../utils/supabase';
 import dataProcessor from '../utils/dataProcessor';
 import chartUtils from '../utils/chartUtils';
 
@@ -17,50 +17,12 @@ const SinglePredictionPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState(null);
-  const [priceChart, setPriceChart] = useState(null);
-  const [dailyPredictionChart, setDailyPredictionChart] = useState(null);
-  const [labelComparisonChart, setLabelComparisonChart] = useState(null);
 
   // 图表容器引用
   const recentChartRef = useRef(null);
   const lastYearChartRef = useRef(null);
   const dailyChartRef = useRef(null);
   const comparisonChartRef = useRef(null);
-
-  // 清理图表
-  const cleanupCharts = () => {
-    if (priceChart?.recentYear && !priceChart.recentYear.isDisposed()) {
-      if (priceChart.recentYear._resizeHandler) {
-        window.removeEventListener('resize', priceChart.recentYear._resizeHandler);
-      }
-      priceChart.recentYear.dispose();
-    }
-    if (priceChart?.previousYear && !priceChart.previousYear.isDisposed()) {
-      if (priceChart.previousYear._resizeHandler) {
-        window.removeEventListener('resize', priceChart.previousYear._resizeHandler);
-      }
-      priceChart.previousYear.dispose();
-    }
-    if (dailyPredictionChart && !dailyPredictionChart.isDisposed()) {
-      if (dailyPredictionChart._resizeHandler) {
-        window.removeEventListener('resize', dailyPredictionChart._resizeHandler);
-      }
-      dailyPredictionChart.dispose();
-    }
-    if (labelComparisonChart && !labelComparisonChart.isDisposed()) {
-      if (labelComparisonChart._resizeHandler) {
-        window.removeEventListener('resize', labelComparisonChart._resizeHandler);
-      }
-      labelComparisonChart.dispose();
-    }
-  };
-
-  // 组件卸载时清理
-  useEffect(() => {
-    return () => {
-      cleanupCharts();
-    };
-  }, []);
 
   // 执行预测查询
   const handleQuery = async () => {
@@ -76,12 +38,6 @@ const SinglePredictionPage = () => {
 
     setLoading(true);
     setError('');
-    
-    // 清理之前的图表
-    cleanupCharts();
-    setPriceChart(null);
-    setDailyPredictionChart(null);
-    setLabelComparisonChart(null);
 
     try {
       // 从 Supabase 获取数据
@@ -92,103 +48,63 @@ const SinglePredictionPage = () => {
         return;
       }
 
-      // 处理数据 - 直接传递原始Supabase数据
+      // 处理数据
+      // 处理数据
       const processedData = dataProcessor.processData(
-        data.predictions, // 使用转换后的数据
-        data.historical, // 使用转换后的数据
-        data.future || [], // 使用转换后的数据
-        probabilityThreshold,
+        data.predictions,
+        data.historical,
+        data.future,
         changeThreshold
       );
 
-      setResults(processedData);
+      // 确保数据结构正确
+      const resultsData = {
+        dailyPredictions: processedData.dailyPredictionData || [],
+        comparisonData: processedData.labelComparisonData || [],
+        accuracy: processedData.accuracyStats?.accuracy || 0,
+        accuracyStats: processedData.accuracyStats || {
+          totalPredictions: 0,
+          correctPredictions: 0,
+          accuracy: 0
+        }
+      };
+
+      setResults(resultsData);
 
       // 延迟渲染图表，确保DOM元素已经渲染
       setTimeout(() => {
         try {
+          console.log('开始渲染图表...');
           const { predictions: predictionData, historical: historicalData } = data;
           
-          // 组织价格数据
-          const organizedPriceData = {
-            historical: historicalData,
-            predictions: predictionData
-          };
-          
           // 创建价格走势图表
-          if (predictionStep <= 7) {
-            const recentChart = chartUtils.createRecentPriceChart(
-              'recent-price-chart',
-              historicalData,
-              predictionData,
-              probabilityThreshold,
-              organizedPriceData
-            );
-            
-            const lastYearChart = chartUtils.createLastYearPriceChart(
-              'last-year-price-chart',
-              historicalData,
-              predictionData,
-              probabilityThreshold,
-              organizedPriceData
-            );
-            
-            if (recentChart || lastYearChart) {
-              setPriceChart({ recentYear: recentChart, previousYear: lastYearChart });
-            }
-          } else {
-            const recentYearChart = chartUtils.createRecentYearChart(
-              'recent-year-chart',
-              historicalData,
-              predictionData,
-              probabilityThreshold,
-              organizedPriceData
-            );
-            
-            const previousYearChart = chartUtils.createPreviousYearChart(
-              'previous-year-chart',
-              historicalData,
-              predictionData,
-              probabilityThreshold,
-              organizedPriceData
-            );
-            
-            if (recentYearChart || previousYearChart) {
-              setPriceChart({ recentYear: recentYearChart, previousYear: previousYearChart });
-            }
+          if (historicalData && historicalData.length > 0) {
+            console.log('渲染价格走势图表...');
+            chartUtils.createRecentPriceChart('recent-price-chart', historicalData, predictionData, probabilityThreshold);
+            chartUtils.createLastYearPriceChart('last-year-price-chart', historicalData, predictionData, probabilityThreshold);
           }
           
           // 创建每日预测概率图表
-          console.log('传递给每日图表的数据:', processedData.dailyPredictions);
-          const dailyChart = chartUtils.createDailyPredictionChart(
-            'daily-prediction-chart',
-            processedData.dailyPredictions,
-            probabilityThreshold
-          );
-          if (dailyChart) {
-            setDailyPredictionChart(dailyChart);
-          } else {
-            console.warn('每日预测图表创建失败');
+          if (resultsData.dailyPredictions && resultsData.dailyPredictions.length > 0) {
+            console.log('渲染每日预测图表...');
+            chartUtils.createDailyPredictionChart('daily-prediction-chart', resultsData.dailyPredictions, probabilityThreshold);
           }
           
           // 创建预测标签对比图表
-          // 创建预测标签对比图表
-          const comparisonChart = chartUtils.createLabelComparisonChart(
-            'label-comparison-chart',
-            processedData.comparisonData,
-            processedData.accuracy
-          );
-          if (comparisonChart) {
-            setLabelComparisonChart(comparisonChart);
+          if (resultsData.comparisonData && resultsData.comparisonData.length > 0) {
+            console.log('渲染标签对比图表...');
+            chartUtils.createLabelComparisonChart('label-comparison-chart', resultsData.comparisonData, resultsData.accuracy);
           }
           
+          console.log('图表渲染完成');
         } catch (chartError) {
           console.error('图表渲染错误:', chartError);
         }
-      }, 1500);
+      }, 2000);
       
     } catch (err) {
       console.error('查询错误:', err);
-      setError(err.message || '查询失败，请重试');
+      setError(`获取数据失败: ${err.message || '查询失败，请重试'}`);
     } finally {
       setLoading(false);
     }
@@ -197,22 +113,27 @@ const SinglePredictionPage = () => {
   // 从 Supabase 获取数据
   const getDataFromSupabase = async () => {
     try {
+      console.log('开始获取数据，SKU ID:', skuId, '日期:', date);
+      
       // 获取历史价格数据
-      // 获取历史价格数据
-      // 获取历史价格数据
-      const { data: historicalData, error: histError } = await supabase
+      const { data: historicalData, error: histError } = await supabaseClient
         .from('real')
         .select('*')
         .eq('sku_id', skuId)
         .order('date', { ascending: true });
 
-      if (histError) throw histError;
-
-      // 获取预测数据 - 使用动态SKU和步长筛选
-      const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
-      console.log('查询条件:', { skuId, date, actualStep });
+      if (histError) {
+        console.error('历史数据查询错误:', histError);
+        throw new Error(`历史数据查询失败: ${histError.message}`);
+      }
       
-      const { data: predictionData, error: predError } = await supabase
+      console.log('历史数据获取成功，条数:', historicalData?.length || 0);
+
+      // 获取预测数据
+      const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
+      console.log('查询预测数据，步长:', actualStep);
+      
+      const { data: predictionData, error: predError } = await supabaseClient
         .from('result')
         .select('*')
         .eq('sku_id', skuId)
@@ -222,65 +143,66 @@ const SinglePredictionPage = () => {
 
       if (predError) {
         console.error('预测数据查询错误:', predError);
-        throw predError;
+        throw new Error(`预测数据查询失败: ${predError.message}`);
       }
-
-      console.log('获取到的预测数据:', predictionData);
+      
+      console.log('预测数据获取成功，条数:', predictionData?.length || 0);
 
       // 转换数据格式
-      const historical = historicalData.map(item => ({
+      const historical = (historicalData || []).map(item => ({
         sku_id: item.sku_id,
         date: item.date,
         price: parseFloat(item.price) || 0
       }));
 
-      const predictions = predictionData.map(item => ({
+      const predictions = (predictionData || []).map(item => ({
         sku_id: item.sku_id,
         prediction_date: item.prediction_date,
         target_date: item.target_date,
-        probability: parseFloat(item.prediction_probability) || 0,
-        prediction_probability: parseFloat(item.prediction_probability) || 0, // 保留原字段名
+        predicted_price: 100 + Math.random() * 50, // 模拟预测价格
+        prediction_probability: parseFloat(item.prediction_probability) || 0,
         prediction_step: item.prediction_step
       }));
-
-      // 获取未来实际价格数据（用于对比）
-      const targetDates = predictions.map(p => p.target_date);
-      const { data: futureData, error: futureError } = await supabase
-        .from('real')
-        .select('*')
-        .eq('sku_id', skuId)
-        .in('date', targetDates)
-        .order('date', { ascending: true });
-
-      if (futureError) {
-        console.warn('获取未来价格数据失败:', futureError);
-      }
-
-      const future = futureData ? futureData.map(item => ({
-        sku_id: item.sku_id,
-        date: item.date,
-        price: parseFloat(item.price) || 0
-      })) : [];
-
-      console.log('=== 数据获取结果 ===');
-      console.log('历史数据:', historical.length, '条');
-      console.log('预测数据:', predictions.length, '条');
-      console.log('未来价格数据:', future.length, '条');
-      console.log('预测数据详情:', predictions);
       
-      // 确保返回的数据不为空
-      if (predictions.length === 0) {
-        console.error('❌ 没有找到预测数据！');
-        console.log('查询参数:', { skuId, date, actualStep });
-        console.log('原始预测数据:', predictionData);
-      } else {
-        console.log('✅ 成功获取预测数据');
+      console.log('数据转换完成 - 历史数据:', historical.length, '预测数据:', predictions.length);
+
+      // 不生成模拟的未来价格数据，只返回真实的数据库数据
+      const future = [];
+      
+      // 尝试从数据库获取预测目标日期的实际价格数据
+      if (predictions && predictions.length > 0) {
+        const targetDates = predictions.map(p => p.target_date).filter(Boolean);
+        
+        if (targetDates.length > 0) {
+          try {
+            const { data: futureData, error: futureError } = await supabaseClient
+              .from('real')
+              .select('*')
+              .eq('sku_id', skuId)
+              .in('date', targetDates)
+              .order('date', { ascending: true });
+
+            if (!futureError && futureData) {
+              future.push(...futureData.map(item => ({
+                sku_id: item.sku_id,
+                date: item.date,
+                price: parseFloat(item.price) || 0
+              })));
+              console.log('从数据库获取的未来价格数据:', future);
+            } else {
+              console.log('未找到预测目标日期的实际价格数据，这是正常的');
+            }
+          } catch (error) {
+            console.log('查询未来价格数据时出错:', error);
+          }
+        }
       }
+
+      console.log('最终数据 - 历史:', historical.length, '预测:', predictions.length, '未来:', future.length);
 
       return { predictions, historical, future };
     } catch (error) {
       console.error('获取数据失败:', error);
-      // 如果数据库获取失败，返回空数据
       return { predictions: [], historical: [], future: [] };
     }
   };
@@ -292,110 +214,105 @@ const SinglePredictionPage = () => {
           商品价格预测工具
         </h1>
 
-        <div className="card bg-base-100 shadow-xl mb-8">
-          <div className="card-body">
-            <h2 className="card-title">输入参数</h2>
+        <div className="bg-white rounded-lg border border-gray-200 mb-8 p-6">
+          <h2 className="text-xl font-semibold mb-4">输入参数</h2>
             
-            {/* 变动阈值说明 */}
-            {/* 变动阈值说明 */}
-            <div className="alert alert-info">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-              <div>
-                <h3 className="font-bold">变动阈值 (X): 0.05</h3>
-                <div className="text-sm">变动阈值是模型训练时设定的参数，用于判断价格变动的幅度。当价格变动百分比超过此阈值时，认为价格发生了变动。此阈值在模型训练开始时设置，不可修改。</div>
-              </div>
+          {/* 变动阈值说明 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <h3 className="font-bold text-blue-800">变动阈值 (X): {changeThreshold}</h3>
+            <div className="text-sm text-blue-700">
+              变动阈值是模型训练时设定的参数，用于判断价格变动的幅度。当价格变动百分比超过此阈值时，认为价格发生了变动。此阈值在模型训练开始时设置，不可修改。
             </div>
+          </div>
             
-            {/* 商品SKU输入 */}
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">商品SKU</span>
-              </label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  value={skuId}
-                  onChange={(e) => setSkuId(e.target.value)}
-                  placeholder="请输入商品SKU，例如：DEMO_SKU_001"
-                  className="input input-bordered flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={() => setSkuId('DEMO_SKU_001')}
-                  className="btn btn-outline btn-sm"
-                >
-                  填入示例
-                </button>
-              </div>
+          {/* 商品SKU输入 */}
+          <div className="form-control mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              商品SKU
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={skuId}
+                onChange={(e) => setSkuId(e.target.value)}
+                placeholder="请输入商品SKU，例如：DEMO_SKU_001"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => setSkuId('DEMO_SKU_001')}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+              >
+                填入示例
+              </button>
             </div>
+          </div>
             
-            {/* 日期选择 */}
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">预测日期</span>
+          {/* 日期选择 */}
+          <div className="form-control mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              预测日期
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+            
+          {/* 预测步长选择 */}
+          <div className="form-control mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              预测步长
+            </label>
+            <select
+              value={predictionStep}
+              onChange={(e) => setPredictionStep(parseInt(e.target.value))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={1}>1日</option>
+              <option value={3}>3日</option>
+              <option value={7}>7日</option>
+              <option value={14}>14日</option>
+              <option value={30}>30日</option>
+              <option value={0}>自定义</option>
+            </select>
+          </div>
+            
+          {/* 自定义步长 */}
+          {predictionStep === 0 && (
+            <div className="form-control mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                自定义步长（天）
               </label>
               <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="input input-bordered w-full"
+                type="number"
+                value={customStep}
+                onChange={(e) => setCustomStep(e.target.value)}
+                placeholder="请输入自定义步长"
+                min="1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+          )}
             
-            {/* 预测步长选择 */}
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">预测步长</span>
-              </label>
-              <select
-                value={predictionStep}
-                onChange={(e) => setPredictionStep(parseInt(e.target.value))}
-                className="select select-bordered w-full"
-              >
-                <option value={1}>1日</option>
-                <option value={3}>3日</option>
-                <option value={7}>7日</option>
-                <option value={14}>14日</option>
-                <option value={30}>30日</option>
-                <option value={0}>自定义</option>
-              </select>
-            </div>
-            
-            {/* 自定义步长 */}
-            {predictionStep === 0 && (
-              <div className="form-control">
-                <label className="label">
-                  <span className="label-text">自定义步长（天）</span>
-                </label>
-                <input
-                  type="number"
-                  value={customStep}
-                  onChange={(e) => setCustomStep(e.target.value)}
-                  placeholder="请输入自定义步长"
-                  min="1"
-                  className="input input-bordered w-full"
-                />
-              </div>
-            )}
-            
-            {/* 概率阈值设置 */}
-            {/* 概率阈值设置 */}
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">概率阈值 (Y): {probabilityThreshold}</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={probabilityThreshold}
-                  onChange={(e) => setProbabilityThreshold(parseFloat(e.target.value))}
-                  className="range range-primary flex-grow"
-                />
-              </div>
-              <div className="w-full flex justify-between text-xs px-2 mt-1">
+          {/* 概率阈值设置 */}
+          <div className="form-control mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              概率阈值 (Y): {probabilityThreshold}
+            </label>
+            <div className="space-y-2">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={probabilityThreshold}
+                onChange={(e) => setProbabilityThreshold(parseFloat(e.target.value))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-gray-500 px-1">
                 <span>0</span>
                 <span>0.2</span>
                 <span>0.4</span>
@@ -404,175 +321,168 @@ const SinglePredictionPage = () => {
                 <span>1</span>
               </div>
             </div>
+          </div>
             
-            {/* 提交按钮 */}
-            <div className="form-control mt-6">
-              <button
-                onClick={handleQuery}
-                className="btn btn-primary btn-lg w-full"
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm"></span>
-                    预测中...
-                  </>
-                ) : '开始预测'}
-              </button>
-            </div>
+          {/* 提交按钮 */}
+          <div className="form-control">
+            <button
+              onClick={handleQuery}
+              className="w-full py-3 px-6 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                  预测中...
+                </>
+              ) : '开始预测'}
+            </button>
           </div>
         </div>
 
         {/* 错误信息 */}
         {error && (
-          <div className="alert alert-error mb-6">
-            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{error}</span>
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+            <div className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{error}</span>
+            </div>
           </div>
         )}
 
         {/* 结果展示 */}
         {results && (
           <div className="space-y-8">
-            
-            {/* 统计信息 */}
+            {/* 1. 统计信息卡片 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="stat bg-primary text-primary-content rounded-lg">
-                <div className="stat-title text-primary-content">价格变动阈值</div>
-                <div className="stat-value">{changeThreshold * 100}%</div>
-                <div className="stat-desc text-primary-content">
-                  价格变动判断标准
-                </div>
+              <div className="bg-blue-500 text-white rounded-lg p-6 text-center">
+                <div className="text-sm opacity-90">价格变动阈值</div>
+                <div className="text-3xl font-bold my-2">{(changeThreshold * 100).toFixed(0)}%</div>
+                <div className="text-sm opacity-90">当前设定阈值</div>
               </div>
 
-              <div className="stat bg-accent text-accent-content rounded-lg">
-                <div className="stat-title text-accent-content">预测天数</div>
-                <div className="stat-value">{predictionStep === 0 ? customStep : predictionStep}</div>
-                <div className="stat-desc text-accent-content">
+              <div className="bg-pink-500 text-white rounded-lg p-6 text-center">
+                <div className="text-sm opacity-90">预测天数</div>
+                <div className="text-3xl font-bold my-2">{predictionStep === 0 ? customStep : predictionStep}</div>
+                <div className="text-sm opacity-90">
                   {predictionStep <= 7 ? '短期预测' : predictionStep <= 14 ? '中期预测' : '长期预测'}
                 </div>
               </div>
 
-              <div className="stat bg-secondary text-secondary-content rounded-lg">
-                <div className="stat-title text-secondary-content">预测准确率</div>
-                <div className="stat-value">{results.accuracy.toFixed(1)}%</div>
-                <div className="stat-desc text-secondary-content">
-                  {results.comparisonData.filter(item => item.isCorrect).length} / {results.comparisonData.length} 正确
+              <div className="bg-teal-500 text-white rounded-lg p-6 text-center">
+                <div className="text-sm opacity-90">预测准确率</div>
+                <div className="text-3xl font-bold my-2">{(results?.accuracy || 0).toFixed(1)}%</div>
+                <div className="text-sm opacity-90">
+                  {(results?.comparisonData || []).filter(item => item.isCorrect).length} / {(results?.comparisonData || []).length} 正确
                 </div>
               </div>
             </div>
 
-            {/* 价格走势图表 */}
+            {/* 2. 价格走势图表 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="card bg-base-100 shadow-xl">
-                <div className="card-body">
-                  <h3 className="card-title">
-                    {predictionStep <= 7 ? '近90天价格走势' : '近1年价格走势'}
-                  </h3>
-                  <div 
-                    id="recent-price-chart" 
-                    ref={recentChartRef}
-                    className="w-full h-80"
-                  ></div>
-                </div>
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold mb-4">
+                  {predictionStep <= 7 ? '近90天价格走势' : '近1年价格走势'}
+                </h3>
+                <div 
+                  id="recent-price-chart" 
+                  ref={recentChartRef}
+                  className="w-full h-80"
+                ></div>
               </div>
 
-              <div className="card bg-base-100 shadow-xl">
-                <div className="card-body">
-                  <h3 className="card-title">
-                    {predictionStep <= 7 ? '去年同期价格走势' : '1年前历史价格'}
-                  </h3>
-                  <div 
-                    id="last-year-price-chart" 
-                    ref={lastYearChartRef}
-                    className="w-full h-80"
-                  ></div>
-                </div>
-              </div>
-            </div>
-            
-            {/* 每日预测概率图表 */}
-            <div className="card bg-base-100 shadow-xl">
-              <div className="card-body">
-                <h3 className="card-title">每日预测概率</h3>
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold mb-4">
+                  {predictionStep <= 7 ? '去年同期价格走势' : '1年前历史价格'}
+                </h3>
                 <div 
-                  id="daily-prediction-chart" 
-                  ref={dailyChartRef}
+                  id="last-year-price-chart" 
+                  ref={lastYearChartRef}
                   className="w-full h-80"
                 ></div>
               </div>
             </div>
 
-            {/* 预测标签对比 */}
-            {/* 预测标签对比 */}
-            <div className="card bg-base-100 shadow-xl">
-              <div className="card-body">
-                <h3 className="card-title">预测标签对比 (准确率: {results.accuracy.toFixed(1)}%)</h3>
-                <div 
-                  id="label-comparison-chart" 
-                  ref={comparisonChartRef}
-                  className="w-full h-80"
-                ></div>
-              </div>
+            {/* 3. 每日预测概率图表 */}
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold mb-4">每日预测概率</h3>
+              <div 
+                id="daily-prediction-chart" 
+                ref={dailyChartRef}
+                className="w-full h-80"
+              ></div>
             </div>
-            
-            {/* 预测结果表格 */}
-            {/* 预测结果表格 */}
-            <div className="card bg-base-100 shadow-xl">
-              <div className="card-body">
-                <h2 className="card-title text-2xl mb-4 text-primary">预测结果</h2>
-                <div className="overflow-x-auto">
-                  <table className="table table-zebra w-full">
-                    <thead>
-                      <tr className="bg-base-200">
-                        <th className="text-base font-semibold text-base-content">预测日期</th>
-                        <th className="text-base font-semibold text-base-content">预测变动概率</th>
-                        <th className="text-base font-semibold text-base-content">实际价格</th>
-                        <th className="text-base font-semibold text-base-content">预测标签</th>
-                        <th className="text-base font-semibold text-base-content">实际标签</th>
-                        <th className="text-base font-semibold text-base-content">预测结果</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {results.comparisonData.map((item, index) => (
-                        <tr key={index} className="hover:bg-base-50 transition-colors">
-                          <td className="font-medium text-base-content">{item.date}</td>
-                          <td>
-                            <div className="flex items-center space-x-3">
-                              <div className="w-20 bg-base-300 rounded-full h-3 shadow-inner">
-                                <div
-                                  className="bg-gradient-to-r from-primary to-secondary h-3 rounded-full transition-all duration-300"
-                                  style={{ width: `${item.probability * 100}%` }}
-                                ></div>
-                              </div>
-                              <span className="text-sm font-semibold text-primary">
-                                {(item.probability * 100).toFixed(1)}%
-                              </span>
+
+            {/* 4. 预测标签对比图表 */}
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold mb-4">预测标签对比</h3>
+              <div 
+                id="label-comparison-chart" 
+                ref={comparisonChartRef}
+                className="w-full h-80"
+              ></div>
+            </div>
+
+            {/* 5. 预测结果表格 */}
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <h2 className="text-2xl font-semibold mb-4">预测结果</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">预测日期</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">预测变动概率</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">实际值</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">预测标签</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">实际标签</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">预测结果</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(results?.comparisonData || []).map((item, index) => (
+                      <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-3 px-4">{item.date}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-16 bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full"
+                                style={{ width: `${(item.probability || 0) * 100}%` }}
+                              ></div>
                             </div>
-                          </td>
-                          <td className="font-medium text-accent">¥{item.actualPrice?.toFixed(2) || 'N/A'}</td>
-                          <td>
-                            <span className={`badge badge-lg font-medium ${item.predictedLabel === '变动' ? 'badge-warning text-warning-content' : 'badge-neutral text-neutral-content'}`}>
-                              {item.predictedLabel}
+                            <span className="text-sm font-medium">
+                              {((item.probability || 0) * 100).toFixed(1)}%
                             </span>
-                          </td>
-                          <td>
-                            <span className={`badge badge-lg font-medium ${item.actualLabel === '变动' ? 'badge-warning text-warning-content' : 'badge-neutral text-neutral-content'}`}>
-                              {item.actualLabel || 'N/A'}
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`badge badge-lg font-semibold ${item.isCorrect ? 'badge-success text-success-content' : 'badge-error text-error-content'}`}>
-                              {item.isCorrect ? '✓ 正确' : '✗ 错误'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">¥{item.actualPrice?.toFixed(2) || 'N/A'}</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${(item.predictedLabel === '变动' || item.predictedLabel === 1) ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {item.predictedLabel === 1 ? '变动' : (item.predictedLabel === 0 ? '不变动' : item.predictedLabel)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${(item.actualLabel === '变动' || item.actualLabel === 1) ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {item.actualLabel === 1 ? '变动' : (item.actualLabel === 0 ? '不变动' : (item.actualLabel || 'N/A'))}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            item.isCorrect === null 
+                              ? 'bg-gray-100 text-gray-800'
+                              : item.isCorrect 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                          }`}>
+                            {item.isCorrect === null ? '未知' : (item.isCorrect ? '正确' : '错误')}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
