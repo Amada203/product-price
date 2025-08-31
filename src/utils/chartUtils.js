@@ -73,7 +73,17 @@ const chartUtils = {
     const { myChart } = chartInit;
     
     try {
-      const predictionDates = [...new Set(predictionData.map(item => item.target_date))];
+      // 安全处理数据
+      if (!Array.isArray(priceData) || priceData.length === 0) {
+        console.warn('Price data is empty or invalid for recent chart');
+        return null;
+      }
+      
+      if (!Array.isArray(predictionData)) {
+        predictionData = [];
+      }
+      
+      const predictionDates = [...new Set(predictionData.map(item => item.target_date).filter(Boolean))];
       
       let maxDate = new Date();
       if (predictionData && predictionData.length > 0) {
@@ -479,7 +489,7 @@ const chartUtils = {
             markLine: {
               data: [
                 {
-                  yAxis: probabilityThreshold || 0.5,
+                  yAxis: typeof probabilityThreshold === 'number' && !isNaN(probabilityThreshold) ? probabilityThreshold : 0.5,
                   name: '概率阈值',
                   lineStyle: {
                     color: '#ff4d4f',
@@ -489,7 +499,10 @@ const chartUtils = {
                   label: {
                     show: true,
                     position: 'insideEndTop',
-                    formatter: `阈值: ${((probabilityThreshold || 0.5) * 100).toFixed(0)}%`,
+                    formatter: function() {
+                      const threshold = typeof probabilityThreshold === 'number' && !isNaN(probabilityThreshold) ? probabilityThreshold : 0.5;
+                      return `阈值: ${(threshold * 100).toFixed(0)}%`;
+                    },
                     backgroundColor: 'rgba(255, 77, 79, 0.9)',
                     color: '#fff',
                     padding: [2, 6],
@@ -527,21 +540,30 @@ const chartUtils = {
         return null;
       }
 
-      const predictionLabels = comparisonData.map((item, index) => [
-        index,
-        (item.predictedLabel === '变动' || item.predictedLabel === 1) ? 1 : 0,
-        item.predictedLabel === 1 ? '变动' : (item.predictedLabel === 0 ? '不变动' : item.predictedLabel)
-      ]);
+      // 确保 accuracy 是数字
+      const safeAccuracy = typeof accuracy === 'number' && !isNaN(accuracy) ? accuracy : 0;
+
+      const predictionLabels = comparisonData.map((item, index) => {
+        if (!item) return [index, 0, '未知'];
+        return [
+          index,
+          (item.predictedLabel === '变动' || item.predictedLabel === 1) ? 1 : 0,
+          item.predictedLabel === 1 ? '变动' : (item.predictedLabel === 0 ? '不变动' : (item.predictedLabel || '未知'))
+        ];
+      });
       
-      const actualLabels = comparisonData.map((item, index) => [
-        index,
-        (item.actualLabel === '变动' || item.actualLabel === 1) ? 1 : 0,
-        item.actualLabel === 1 ? '变动' : (item.actualLabel === 0 ? '不变动' : (item.actualLabel || 'N/A'))
-      ]);
+      const actualLabels = comparisonData.map((item, index) => {
+        if (!item) return [index, 0, '未知'];
+        return [
+          index,
+          (item.actualLabel === '变动' || item.actualLabel === 1) ? 1 : 0,
+          item.actualLabel === 1 ? '变动' : (item.actualLabel === 0 ? '不变动' : (item.actualLabel || 'N/A'))
+        ];
+      });
       
       const option = {
         title: {
-          text: `预测标签对比 (准确率: ${accuracy.toFixed(1)}%)`,
+          text: `预测标签对比 (准确率: ${safeAccuracy.toFixed(1)}%)`,
           left: 'center',
           textStyle: {
             fontSize: 14,
@@ -554,15 +576,44 @@ const chartUtils = {
             type: 'cross'
           },
           formatter: function(params) {
+            if (!params || !Array.isArray(params) || params.length === 0) {
+              return '暂无数据';
+            }
+            
             const index = params[0].dataIndex;
             const item = comparisonData[index];
-            const date = new Date(item.date);
-            const formattedDate = `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(date.getDate()).padStart(2, '0')}日`;
-            let result = formattedDate + '<br/>';
+            
+            if (!item) {
+              return '数据不可用';
+            }
+            
+            let result = '';
+            
+            // 安全处理日期
+            if (item.date) {
+              try {
+                const date = new Date(item.date);
+                if (!isNaN(date.getTime())) {
+                  const formattedDate = `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(date.getDate()).padStart(2, '0')}日`;
+                  result = formattedDate + '<br/>';
+                }
+              } catch (e) {
+                result = `第${index + 1}天<br/>`;
+              }
+            } else {
+              result = `第${index + 1}天<br/>`;
+            }
+            
             params.forEach(param => {
-              result += `${param.seriesName}: ${param.value[2]}<br/>`;
+              if (param && param.seriesName && param.value && param.value[2] !== undefined) {
+                result += `${param.seriesName}: ${param.value[2]}<br/>`;
+              }
             });
-            result += `预测结果: ${item.isCorrect ? '正确' : '错误'}<br/>`;
+            
+            if (item.isCorrect !== undefined && item.isCorrect !== null) {
+              result += `预测结果: ${item.isCorrect ? '正确' : '错误'}<br/>`;
+            }
+            
             return result;
           }
         },
