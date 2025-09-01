@@ -117,58 +117,92 @@ const SinglePredictionPage = () => {
       setResults(resultsData);
 
       // 延迟渲染图表，确保DOM元素已经渲染
-      setTimeout(() => {
-        try {
-          console.log('开始渲染图表...');
-          const { predictions: predictionData, historical: historicalData } = data;
-          
-          // 检查DOM元素是否存在，避免 getBoundingClientRect 错误
-          const checkAndRenderChart = (chartId, renderFunction) => {
-            const element = document.getElementById(chartId);
-            if (element && element.getBoundingClientRect) {
-              try {
-                renderFunction();
-                console.log(`${chartId} 渲染成功`);
-              } catch (error) {
-                console.error(`${chartId} 渲染失败:`, error);
+      // 使用更安全的图表渲染策略，避免 getBoundingClientRect 错误
+      const renderChartsWhenReady = () => {
+        const safeRenderChart = (chartId, renderFunction, delay = 0) => {
+          setTimeout(() => {
+            try {
+              const element = document.getElementById(chartId);
+              
+              // 严格的元素存在性检查
+              if (!element) {
+                console.warn(`DOM元素 ${chartId} 不存在`);
+                return;
               }
-            } else {
-              console.warn(`DOM元素 ${chartId} 不存在或未准备好`);
+              
+              // 检查元素是否在DOM中
+              if (!document.body.contains(element)) {
+                console.warn(`DOM元素 ${chartId} 不在文档中`);
+                return;
+              }
+              
+              // 安全的尺寸检查，避免 getBoundingClientRect 错误
+              let hasValidSize = false;
+              try {
+                // 优先使用 offsetWidth/offsetHeight，更安全
+                hasValidSize = element.offsetWidth > 0 && element.offsetHeight > 0;
+                
+                // 如果 offset 方法失败，再尝试 getBoundingClientRect
+                if (!hasValidSize && typeof element.getBoundingClientRect === 'function') {
+                  const rect = element.getBoundingClientRect();
+                  hasValidSize = rect && rect.width > 0 && rect.height > 0;
+                }
+              } catch (sizeError) {
+                console.warn(`${chartId} 尺寸检查失败:`, sizeError);
+                // 如果尺寸检查失败，仍然尝试渲染
+                hasValidSize = true;
+              }
+              
+              if (!hasValidSize) {
+                console.warn(`DOM元素 ${chartId} 尺寸无效`);
+                return;
+              }
+              
+              // 执行渲染函数
+              renderFunction();
+              console.log(`${chartId} 渲染成功`);
+              
+            } catch (error) {
+              console.error(`${chartId} 渲染失败:`, error);
             }
-          };
-          
-          // 创建价格走势图表
-          if (historicalData && historicalData.length > 0) {
-            console.log('渲染价格走势图表...');
-            checkAndRenderChart('recent-price-chart', () => {
-              chartUtils.createRecentPriceChart('recent-price-chart', historicalData, predictionData, probabilityThreshold);
-            });
-            checkAndRenderChart('last-year-price-chart', () => {
-              chartUtils.createLastYearPriceChart('last-year-price-chart', historicalData, predictionData, probabilityThreshold);
-            });
-          }
-          
-          // 创建每日预测概率图表
-          if (resultsData.dailyPredictions && resultsData.dailyPredictions.length > 0) {
-            console.log('渲染每日预测图表...');
-            checkAndRenderChart('daily-prediction-chart', () => {
-              chartUtils.createDailyPredictionChart('daily-prediction-chart', resultsData.dailyPredictions, probabilityThreshold);
-            });
-          }
-          
-          // 创建预测标签对比图表
-          if (resultsData.comparisonData && resultsData.comparisonData.length > 0) {
-            console.log('渲染标签对比图表...');
-            checkAndRenderChart('label-comparison-chart', () => {
-              chartUtils.createLabelComparisonChart('label-comparison-chart', resultsData.comparisonData, resultsData.accuracy);
-            });
-          }
-          
-          console.log('图表渲染完成');
-        } catch (chartError) {
-          console.error('图表渲染错误:', chartError);
+          }, delay);
+        };
+        
+        console.log('开始渲染图表...');
+        const { predictions: predictionData, historical: historicalData } = data;
+        
+        // 创建价格走势图表
+        if (historicalData && historicalData.length > 0) {
+          console.log('渲染价格走势图表...');
+          safeRenderChart('recent-price-chart', () => {
+            chartUtils.createRecentPriceChart('recent-price-chart', historicalData, predictionData, probabilityThreshold);
+          }, 100);
+          safeRenderChart('last-year-price-chart', () => {
+            chartUtils.createLastYearPriceChart('last-year-price-chart', historicalData, predictionData, probabilityThreshold);
+          }, 200);
         }
-      }, 2000);
+        
+        // 创建每日预测概率图表
+        if (resultsData.dailyPredictions && resultsData.dailyPredictions.length > 0) {
+          console.log('渲染每日预测图表...');
+          safeRenderChart('daily-prediction-chart', () => {
+            chartUtils.createDailyPredictionChart('daily-prediction-chart', resultsData.dailyPredictions, probabilityThreshold);
+          }, 300);
+        }
+        
+        // 创建预测标签对比图表
+        if (resultsData.comparisonData && resultsData.comparisonData.length > 0) {
+          console.log('渲染标签对比图表...');
+          safeRenderChart('label-comparison-chart', () => {
+            chartUtils.createLabelComparisonChart('label-comparison-chart', resultsData.comparisonData, resultsData.accuracy);
+          }, 400);
+        }
+        
+        console.log('图表渲染任务已启动');
+      };
+      
+      // 延迟执行，确保DOM完全渲染
+      setTimeout(renderChartsWhenReady, 1500);
       
     } catch (err) {
       console.error('查询错误:', err);
