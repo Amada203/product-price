@@ -21,29 +21,53 @@ const chartUtils = {
         return null;
       }
       
-      if (chartDom.offsetWidth === 0 || chartDom.offsetHeight === 0) {
+      // 更安全的尺寸检查
+      const hasValidDimensions = () => {
+        try {
+          return chartDom.offsetWidth > 0 && chartDom.offsetHeight > 0;
+        } catch (e) {
+          console.warn(`Failed to check dimensions for "${elementId}":`, e);
+          return true; // 如果检查失败，假设尺寸有效
+        }
+      };
+      
+      if (!hasValidDimensions()) {
         console.warn(`Chart container "${elementId}" has no dimensions`);
         return null;
       }
       
-      // 安全检查 getBoundingClientRect 方法
-      let rect = null;
-      try {
-        if (typeof chartDom.getBoundingClientRect === 'function') {
-          rect = chartDom.getBoundingClientRect();
+      // 更安全的 getBoundingClientRect 检查
+      const checkBoundingRect = () => {
+        try {
+          if (typeof chartDom.getBoundingClientRect === 'function') {
+            const rect = chartDom.getBoundingClientRect();
+            return rect && rect.width > 0 && rect.height > 0;
+          }
+          return true; // 如果方法不存在，假设有效
+        } catch (rectError) {
+          console.warn(`getBoundingClientRect failed for "${elementId}":`, rectError);
+          return true; // 如果检查失败，继续执行
         }
-      } catch (rectError) {
-        console.warn(`getBoundingClientRect failed for "${elementId}":`, rectError);
-        // 继续执行，不阻止图表创建
-      }
+      };
       
-      if (rect && (rect.width === 0 || rect.height === 0)) {
+      if (!checkBoundingRect()) {
         console.warn(`Chart container "${elementId}" has invalid bounding rect`);
         return null;
       }
       
-      echarts.dispose(chartDom);
+      // 安全地销毁现有图表实例
+      try {
+        echarts.dispose(chartDom);
+      } catch (disposeError) {
+        console.warn(`Failed to dispose existing chart for "${elementId}":`, disposeError);
+      }
+      
       const myChart = echarts.init(chartDom);
+      if (!myChart) {
+        console.error(`Failed to initialize ECharts for "${elementId}"`);
+        return null;
+      }
+      
       return { chartDom, myChart };
     } catch (error) {
       console.error(`Failed to initialize chart for "${elementId}":`, error);

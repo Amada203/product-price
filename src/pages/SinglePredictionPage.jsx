@@ -122,23 +122,46 @@ const SinglePredictionPage = () => {
           console.log('开始渲染图表...');
           const { predictions: predictionData, historical: historicalData } = data;
           
+          // 检查DOM元素是否存在，避免 getBoundingClientRect 错误
+          const checkAndRenderChart = (chartId, renderFunction) => {
+            const element = document.getElementById(chartId);
+            if (element && element.getBoundingClientRect) {
+              try {
+                renderFunction();
+                console.log(`${chartId} 渲染成功`);
+              } catch (error) {
+                console.error(`${chartId} 渲染失败:`, error);
+              }
+            } else {
+              console.warn(`DOM元素 ${chartId} 不存在或未准备好`);
+            }
+          };
+          
           // 创建价格走势图表
           if (historicalData && historicalData.length > 0) {
             console.log('渲染价格走势图表...');
-            chartUtils.createRecentPriceChart('recent-price-chart', historicalData, predictionData, probabilityThreshold);
-            chartUtils.createLastYearPriceChart('last-year-price-chart', historicalData, predictionData, probabilityThreshold);
+            checkAndRenderChart('recent-price-chart', () => {
+              chartUtils.createRecentPriceChart('recent-price-chart', historicalData, predictionData, probabilityThreshold);
+            });
+            checkAndRenderChart('last-year-price-chart', () => {
+              chartUtils.createLastYearPriceChart('last-year-price-chart', historicalData, predictionData, probabilityThreshold);
+            });
           }
           
           // 创建每日预测概率图表
           if (resultsData.dailyPredictions && resultsData.dailyPredictions.length > 0) {
             console.log('渲染每日预测图表...');
-            chartUtils.createDailyPredictionChart('daily-prediction-chart', resultsData.dailyPredictions, probabilityThreshold);
+            checkAndRenderChart('daily-prediction-chart', () => {
+              chartUtils.createDailyPredictionChart('daily-prediction-chart', resultsData.dailyPredictions, probabilityThreshold);
+            });
           }
           
           // 创建预测标签对比图表
           if (resultsData.comparisonData && resultsData.comparisonData.length > 0) {
             console.log('渲染标签对比图表...');
-            chartUtils.createLabelComparisonChart('label-comparison-chart', resultsData.comparisonData, resultsData.accuracy);
+            checkAndRenderChart('label-comparison-chart', () => {
+              chartUtils.createLabelComparisonChart('label-comparison-chart', resultsData.comparisonData, resultsData.accuracy);
+            });
           }
           
           console.log('图表渲染完成');
