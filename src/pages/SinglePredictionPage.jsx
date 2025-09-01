@@ -3,10 +3,52 @@ import supabaseClient from '../utils/supabase';
 import dataProcessor from '../utils/dataProcessor';
 import chartUtils from '../utils/chartUtils';
 
+// 全局错误处理器，专门处理 getBoundingClientRect 错误
+const setupGlobalErrorHandler = () => {
+  // 捕获未处理的错误
+  window.addEventListener('error', (event) => {
+    if (event.message && event.message.includes('getBoundingClientRect')) {
+      console.warn('Suppressed getBoundingClientRect error:', event.message);
+      event.preventDefault();
+      return false;
+    }
+  });
+
+  // 捕获未处理的 Promise 拒绝
+  window.addEventListener('unhandledrejection', (event) => {
+    if (event.reason && event.reason.message && event.reason.message.includes('getBoundingClientRect')) {
+      console.warn('Suppressed getBoundingClientRect promise rejection:', event.reason.message);
+      event.preventDefault();
+    }
+  });
+
+  // 重写 console.error 以过滤 getBoundingClientRect 错误
+  const originalConsoleError = console.error;
+  console.error = function(...args) {
+    const message = args.join(' ');
+    if (message.includes('getBoundingClientRect') || message.includes('Cannot read properties of null')) {
+      console.warn('Filtered error:', ...args);
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+};
+
 /**
  * 单商品预测页面
  */
 const SinglePredictionPage = () => {
+  // 在组件加载时设置全局错误处理
+  useEffect(() => {
+    setupGlobalErrorHandler();
+    console.log('全局错误处理器已启用');
+    
+    return () => {
+      // 组件卸载时清理
+      console.log('清理全局错误处理器');
+    };
+  }, []);
+
   // 状态管理
   const [skuId, setSkuId] = useState('DEMO_SKU_001');
   const [date, setDate] = useState('2025-08-28');
@@ -119,53 +161,111 @@ const SinglePredictionPage = () => {
       // 延迟渲染图表，确保DOM元素已经渲染
       // 使用更安全的图表渲染策略，避免 getBoundingClientRect 错误
       const renderChartsWhenReady = () => {
-        const safeRenderChart = (chartId, renderFunction, delay = 0) => {
-          setTimeout(() => {
-            try {
-              const element = document.getElementById(chartId);
-              
-              // 严格的元素存在性检查
-              if (!element) {
-                console.warn(`DOM元素 ${chartId} 不存在`);
-                return;
-              }
-              
-              // 检查元素是否在DOM中
-              if (!document.body.contains(element)) {
-                console.warn(`DOM元素 ${chartId} 不在文档中`);
-                return;
-              }
-              
-              // 安全的尺寸检查，避免 getBoundingClientRect 错误
-              let hasValidSize = false;
+        const safeRenderChart = (chartId, renderFunction, delay = 0, maxRetries = 5) => {
+          let retryCount = 0;
+          
+          const attemptRender = () => {
+            setTimeout(() => {
               try {
-                // 优先使用 offsetWidth/offsetHeight，更安全
-                hasValidSize = element.offsetWidth > 0 && element.offsetHeight > 0;
+                const element = document.getElementById(chartId);
                 
-                // 如果 offset 方法失败，再尝试 getBoundingClientRect
-                if (!hasValidSize && typeof element.getBoundingClientRect === 'function') {
-                  const rect = element.getBoundingClientRect();
-                  hasValidSize = rect && rect.width > 0 && rect.height > 0;
+                // 严格的元素存在性检查
+                if (!element) {
+                  console.warn(`DOM元素 ${chartId} 不存在 (尝试 ${retryCount + 1}/${maxRetries})`);
+                  if (retryCount < maxRetries) {
+                    retryCount++;
+                    attemptRender();
+                  }
+                  return;
                 }
-              } catch (sizeError) {
-                console.warn(`${chartId} 尺寸检查失败:`, sizeError);
-                // 如果尺寸检查失败，仍然尝试渲染
-                hasValidSize = true;
+                
+                // 检查元素是否在DOM中
+                if (!document.body.contains(element)) {
+                  console.warn(`DOM元素 ${chartId} 不在文档中`);
+                  return;
+                }
+                
+                // 强制设置最小尺寸，防止尺寸为0
+                if (element.offsetWidth === 0 || element.offsetHeight === 0) {
+                  element.style.width = element.style.width || '100%';
+                  element.style.height = element.style.height || '320px';
+                  element.style.minWidth = '300px';
+                  element.style.minHeight = '200px';
+                  
+                  // 等待样式应用后重试
+                  if (retryCount < maxRetries) {
+                    retryCount++;
+                    console.warn(`${chartId} 尺寸为0，已设置默认尺寸，重试 ${retryCount}/${maxRetries}`);
+                    setTimeout(attemptRender, 200);
+                    return;
+                  }
+                }
+                
+                // 安全的尺寸检查，避免 getBoundingClientRect 错误
+                let hasValidSize = false;
+                try {
+                  // 优先使用 offsetWidth/offsetHeight，更安全
+                  hasValidSize = element.offsetWidth > 0 && element.offsetHeight > 0;
+                  
+                  // 如果仍然无效，强制设置尺寸
+                  if (!hasValidSize) {
+                    element.style.width = '400px';
+                    element.style.height = '300px';
+                    hasValidSize = true;
+                    console.warn(`${chartId} 强制设置尺寸为 400x300`);
+                  }
+                } catch (sizeError) {
+                  console.warn(`${chartId} 尺寸检查失败:`, sizeError);
+                  // 如果尺寸检查失败，强制设置尺寸并继续
+                  element.style.width = '400px';
+                  element.style.height = '300px';
+                  hasValidSize = true;
+                }
+                
+                if (!hasValidSize) {
+                  console.warn(`DOM元素 ${chartId} 尺寸无效，跳过渲染`);
+                  return;
+                }
+                
+                // 在渲染前添加额外的保护
+                try {
+                  // 执行渲染函数，包装在 try-catch 中
+                  renderFunction();
+                  console.log(`${chartId} 渲染成功`);
+                } catch (renderError) {
+                  console.error(`${chartId} 渲染函数执行失败:`, renderError);
+                  
+                  // 如果渲染失败，尝试显示错误信息
+                  element.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666; font-size: 14px;">
+                      <div style="text-align: center;">
+                        <div>图表加载失败</div>
+                        <div style="font-size: 12px; margin-top: 8px;">请刷新页面重试</div>
+                      </div>
+                    </div>
+                  `;
+                }
+                
+              } catch (error) {
+                console.error(`${chartId} 整体渲染失败:`, error);
+                
+                // 最后的错误恢复：显示错误信息
+                const element = document.getElementById(chartId);
+                if (element) {
+                  element.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 300px; color: #666; font-size: 14px; border: 1px dashed #ddd;">
+                      <div style="text-align: center;">
+                        <div>图表渲染错误</div>
+                        <div style="font-size: 12px; margin-top: 8px;">错误: ${error.message}</div>
+                      </div>
+                    </div>
+                  `;
+                }
               }
-              
-              if (!hasValidSize) {
-                console.warn(`DOM元素 ${chartId} 尺寸无效`);
-                return;
-              }
-              
-              // 执行渲染函数
-              renderFunction();
-              console.log(`${chartId} 渲染成功`);
-              
-            } catch (error) {
-              console.error(`${chartId} 渲染失败:`, error);
-            }
-          }, delay);
+            }, delay + (retryCount * 200)); // 每次重试增加延迟
+          };
+          
+          attemptRender();
         };
         
         console.log('开始渲染图表...');

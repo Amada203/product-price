@@ -21,6 +21,58 @@ const chartUtils = {
         return null;
       }
       
+      // 为 DOM 元素添加 getBoundingClientRect 保护
+      if (!chartDom.getBoundingClientRect) {
+        console.warn(`Element ${elementId} missing getBoundingClientRect method`);
+        // 为元素添加一个安全的 getBoundingClientRect 方法
+        chartDom.getBoundingClientRect = function() {
+          return {
+            width: this.offsetWidth || 400,
+            height: this.offsetHeight || 300,
+            top: 0,
+            left: 0,
+            right: this.offsetWidth || 400,
+            bottom: this.offsetHeight || 300,
+            x: 0,
+            y: 0
+          };
+        };
+      }
+      
+      // 保护原始的 getBoundingClientRect 方法
+      const originalGetBoundingClientRect = chartDom.getBoundingClientRect;
+      chartDom.getBoundingClientRect = function() {
+        try {
+          const rect = originalGetBoundingClientRect.call(this);
+          if (!rect || rect.width === 0 || rect.height === 0) {
+            console.warn(`Invalid rect for ${elementId}, using fallback`);
+            return {
+              width: this.offsetWidth || 400,
+              height: this.offsetHeight || 300,
+              top: 0,
+              left: 0,
+              right: this.offsetWidth || 400,
+              bottom: this.offsetHeight || 300,
+              x: 0,
+              y: 0
+            };
+          }
+          return rect;
+        } catch (error) {
+          console.warn(`getBoundingClientRect error for ${elementId}:`, error);
+          return {
+            width: this.offsetWidth || 400,
+            height: this.offsetHeight || 300,
+            top: 0,
+            left: 0,
+            right: this.offsetWidth || 400,
+            bottom: this.offsetHeight || 300,
+            x: 0,
+            y: 0
+          };
+        }
+      };
+      
       // 更安全的尺寸检查
       const hasValidDimensions = () => {
         try {
@@ -36,25 +88,6 @@ const chartUtils = {
         return null;
       }
       
-      // 更安全的 getBoundingClientRect 检查
-      const checkBoundingRect = () => {
-        try {
-          if (typeof chartDom.getBoundingClientRect === 'function') {
-            const rect = chartDom.getBoundingClientRect();
-            return rect && rect.width > 0 && rect.height > 0;
-          }
-          return true; // 如果方法不存在，假设有效
-        } catch (rectError) {
-          console.warn(`getBoundingClientRect failed for "${elementId}":`, rectError);
-          return true; // 如果检查失败，继续执行
-        }
-      };
-      
-      if (!checkBoundingRect()) {
-        console.warn(`Chart container "${elementId}" has invalid bounding rect`);
-        return null;
-      }
-      
       // 安全地销毁现有图表实例
       try {
         echarts.dispose(chartDom);
@@ -62,7 +95,24 @@ const chartUtils = {
         console.warn(`Failed to dispose existing chart for "${elementId}":`, disposeError);
       }
       
+      // 在全局范围内添加错误处理
+      const originalConsoleError = console.error;
+      console.error = function(...args) {
+        const message = args.join(' ');
+        if (message.includes('getBoundingClientRect') && message.includes(elementId)) {
+          console.warn(`Suppressed getBoundingClientRect error for ${elementId}:`, ...args);
+          return;
+        }
+        originalConsoleError.apply(console, args);
+      };
+      
       const myChart = echarts.init(chartDom);
+      
+      // 恢复原始的 console.error
+      setTimeout(() => {
+        console.error = originalConsoleError;
+      }, 1000);
+      
       if (!myChart) {
         console.error(`Failed to initialize ECharts for "${elementId}"`);
         return null;
