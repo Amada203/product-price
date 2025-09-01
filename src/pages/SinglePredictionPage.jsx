@@ -66,50 +66,6 @@ const SinglePredictionPage = () => {
   const dailyChartRef = useRef(null);
   const comparisonChartRef = useRef(null);
 
-  // 生成模拟历史数据
-  const generateMockHistoricalData = (skuId, targetDate) => {
-    const data = [];
-    const basePrice = 100 + Math.random() * 200; // 100-300之间的基础价格
-    
-    // 生成90天的历史数据
-    for (let i = 89; i >= 0; i--) {
-      const date = new Date(targetDate);
-      date.setDate(date.getDate() - i);
-      
-      const priceVariation = (Math.random() - 0.5) * 20; // ±10的价格波动
-      const price = Math.max(50, basePrice + priceVariation);
-      
-      data.push({
-        sku_id: skuId,
-        date: date.toISOString().split('T')[0],
-        price: Math.round(price * 100) / 100
-      });
-    }
-    
-    console.log('生成模拟历史数据:', data.length, '条');
-    return data;
-  };
-
-  // 生成模拟预测数据
-  const generateMockPredictionData = (skuId, predictionDate, steps) => {
-    const data = [];
-    
-    for (let i = 1; i <= steps; i++) {
-      const targetDate = new Date(predictionDate);
-      targetDate.setDate(targetDate.getDate() + i);
-      
-      data.push({
-        sku_id: skuId,
-        prediction_date: predictionDate,
-        target_date: targetDate.toISOString().split('T')[0],
-        prediction_probability: 0.3 + Math.random() * 0.4, // 0.3-0.7之间的概率
-        prediction_step: i
-      });
-    }
-    
-    console.log('生成模拟预测数据:', data.length, '条');
-    return data;
-  };
 
   // 执行预测查询
   const handleQuery = async () => {
@@ -317,111 +273,84 @@ const SinglePredictionPage = () => {
     try {
       console.log('开始获取数据，SKU ID:', skuId, '日期:', date);
       
-      // 添加网络连接检查和错误处理
-      let historicalData = [];
-      let predictionData = [];
+      // 获取历史价格数据
+      const histResult = await supabaseClient
+        .from('real')
+        .select('*')
+        .eq('sku_id', skuId)
+        .order('date', { ascending: true });
+
+      if (histResult.error) {
+        throw new Error(`历史数据查询错误: ${histResult.error.message}`);
+      }
+
+      const historicalData = histResult.data || [];
+      console.log('历史数据获取成功，条数:', historicalData.length);
+
+      // 获取预测数据
+      const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
+      console.log('查询预测数据，步长:', actualStep);
       
-      try {
-        // 获取历史价格数据
-        const histResult = await supabaseClient
-          .from('real')
-          .select('*')
-          .eq('sku_id', skuId)
-          .order('date', { ascending: true });
+      const predResult = await supabaseClient
+        .from('result')
+        .select('*')
+        .eq('sku_id', skuId)
+        .eq('prediction_date', date)
+        .lte('prediction_step', actualStep)
+        .order('prediction_step', { ascending: true });
 
-        if (histResult.error) {
-          console.error('历史数据查询错误:', histResult.error);
-          // 不抛出错误，使用模拟数据
-          historicalData = generateMockHistoricalData(skuId, date);
-        } else {
-          historicalData = histResult.data || [];
-          console.log('历史数据获取成功，条数:', historicalData.length);
-        }
-      } catch (networkError) {
-        console.error('网络连接错误，使用模拟历史数据:', networkError);
-        historicalData = generateMockHistoricalData(skuId, date);
+      if (predResult.error) {
+        throw new Error(`预测数据查询错误: ${predResult.error.message}`);
       }
 
-      try {
-        // 获取预测数据
-        const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
-        console.log('查询预测数据，步长:', actualStep);
-        
-        const predResult = await supabaseClient
-          .from('result')
-          .select('*')
-          .eq('sku_id', skuId)
-          .eq('prediction_date', date)
-          .lte('prediction_step', actualStep)
-          .order('prediction_step', { ascending: true });
-
-        if (predResult.error) {
-          console.error('预测数据查询错误:', predResult.error);
-          // 不抛出错误，使用模拟数据
-          predictionData = generateMockPredictionData(skuId, date, actualStep);
-        } else {
-          predictionData = predResult.data || [];
-          console.log('预测数据获取成功，条数:', predictionData.length);
-        }
-      } catch (networkError) {
-        console.error('网络连接错误，使用模拟预测数据:', networkError);
-        const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
-        predictionData = generateMockPredictionData(skuId, date, actualStep);
-      }
+      const predictionData = predResult.data || [];
+      console.log('预测数据获取成功，条数:', predictionData.length);
 
       // 转换数据格式
-      const historical = (historicalData || []).map(item => ({
+      const historical = historicalData.map(item => ({
         sku_id: item.sku_id,
         date: item.date,
         price: parseFloat(item.price) || 0
       }));
 
-      const predictions = (predictionData || []).map(item => ({
+      const predictions = predictionData.map(item => ({
         sku_id: item.sku_id,
-        prediction_date: item.prediction_date || predictionDate,
+        prediction_date: item.prediction_date,
         target_date: item.target_date,
-        predicted_price: 100 + Math.random() * 50, // 模拟预测价格
+        predicted_price: parseFloat(item.predicted_price) || 0,
         prediction_probability: parseFloat(item.prediction_probability) || 0,
         prediction_step: item.prediction_step
       }));
-      
-      console.log('数据转换完成 - 历史数据:', historical.length, '预测数据:', predictions.length);
 
-      // 生成一些模拟的未来价格数据用于验证预测准确性
+      // 获取未来实际价格数据用于验证预测准确性
       const future = [];
-      
-      // 如果有预测数据，为前几天生成一些模拟的"实际"价格数据
-      if (predictions && predictions.length > 0) {
+      if (predictions.length > 0) {
         const targetDates = predictions.map(p => p.target_date).filter(Boolean);
         
-        // 为前几个预测日期生成模拟的实际价格数据
-        targetDates.slice(0, Math.min(3, targetDates.length)).forEach(targetDate => {
-          const basePrice = historical.length > 0 ? historical[historical.length - 1].price : 100;
-          const priceChange = (Math.random() - 0.5) * 20; // ±10的价格变动
-          const actualPrice = Math.max(50, basePrice + priceChange);
-          
-          future.push({
-            sku_id: skuId,
-            date: targetDate,
-            price: Math.round(actualPrice * 100) / 100
-          });
-        });
-        
-        console.log('生成模拟未来价格数据:', future.length, '条');
-      }
+        if (targetDates.length > 0) {
+          const futureResult = await supabaseClient
+            .from('real')
+            .select('*')
+            .eq('sku_id', skuId)
+            .in('date', targetDates)
+            .order('date', { ascending: true });
 
-      console.log('最终数据 - 历史:', historical.length, '预测:', predictions.length, '未来:', future.length);
+          if (!futureResult.error && futureResult.data) {
+            future.push(...futureResult.data.map(item => ({
+              sku_id: item.sku_id,
+              date: item.date,
+              price: parseFloat(item.price) || 0
+            })));
+          }
+        }
+      }
+      
+      console.log('数据转换完成 - 历史数据:', historical.length, '预测数据:', predictions.length, '未来数据:', future.length);
 
       return { predictions, historical, future };
     } catch (error) {
-      console.error('获取数据失败，返回模拟数据:', error);
-      // 完全失败时返回模拟数据
-      const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
-      return {
-        predictions: generateMockPredictionData(skuId, date, actualStep),
-        historical: generateMockHistoricalData(skuId, date),
-        future: []
-      };
+      console.error('获取数据失败:', error);
+      throw error; // 重新抛出错误，让调用方处理
     }
   };
 
