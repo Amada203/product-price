@@ -126,18 +126,22 @@ const SinglePredictionPage = () => {
                 const element = document.getElementById(chartId);
                 
                 // 严格的元素存在性检查
-                if (!element) {
+                if (!element || element === null) {
                   console.warn(`DOM元素 ${chartId} 不存在 (尝试 ${retryCount + 1}/${maxRetries})`);
                   if (retryCount < maxRetries) {
                     retryCount++;
-                    attemptRender();
+                    setTimeout(attemptRender, 500);
                   }
                   return;
                 }
                 
-                // 检查元素是否在DOM中
-                if (!document.body.contains(element)) {
-                  console.warn(`DOM元素 ${chartId} 不在文档中`);
+                // 检查元素是否在DOM中且已挂载
+                if (!document.body.contains(element) || !element.isConnected) {
+                  console.warn(`DOM元素 ${chartId} 不在文档中或未连接`);
+                  if (retryCount < maxRetries) {
+                    retryCount++;
+                    setTimeout(attemptRender, 500);
+                  }
                   return;
                 }
                 
@@ -157,25 +161,52 @@ const SinglePredictionPage = () => {
                   }
                 }
                 
-                // 安全的尺寸检查，避免 getBoundingClientRect 错误
+                // 安全的尺寸检查，完全避免 getBoundingClientRect 错误
                 let hasValidSize = false;
                 try {
-                  // 优先使用 offsetWidth/offsetHeight，更安全
-                  hasValidSize = element.offsetWidth > 0 && element.offsetHeight > 0;
+                  // 完全避免使用 getBoundingClientRect，只使用 offset 属性
+                  const width = element.offsetWidth || 0;
+                  const height = element.offsetHeight || 0;
                   
-                  // 如果仍然无效，强制设置尺寸
-                  if (!hasValidSize) {
-                    element.style.width = '400px';
-                    element.style.height = '300px';
+                  console.log(`${chartId} 当前尺寸: ${width}x${height}`);
+                  
+                  if (width > 0 && height > 0) {
                     hasValidSize = true;
-                    console.warn(`${chartId} 强制设置尺寸为 400x300`);
+                  } else {
+                    // 强制设置尺寸并等待应用
+                    element.style.width = '100%';
+                    element.style.height = '320px';
+                    element.style.minWidth = '400px';
+                    element.style.minHeight = '300px';
+                    element.style.display = 'block';
+                    
+                    // 强制重排
+                    element.offsetHeight;
+                    
+                    // 再次检查
+                    const newWidth = element.offsetWidth || 0;
+                    const newHeight = element.offsetHeight || 0;
+                    
+                    if (newWidth > 0 && newHeight > 0) {
+                      hasValidSize = true;
+                      console.log(`${chartId} 设置尺寸后: ${newWidth}x${newHeight}`);
+                    } else {
+                      console.warn(`${chartId} 无法获取有效尺寸，跳过渲染`);
+                    }
                   }
                 } catch (sizeError) {
-                  console.warn(`${chartId} 尺寸检查失败:`, sizeError);
-                  // 如果尺寸检查失败，强制设置尺寸并继续
-                  element.style.width = '400px';
-                  element.style.height = '300px';
-                  hasValidSize = true;
+                  console.warn(`${chartId} 尺寸检查完全失败:`, sizeError);
+                  // 最后的尝试：直接设置固定尺寸
+                  try {
+                    element.style.width = '400px';
+                    element.style.height = '300px';
+                    element.style.display = 'block';
+                    hasValidSize = true;
+                    console.log(`${chartId} 使用固定尺寸 400x300`);
+                  } catch (fallbackError) {
+                    console.error(`${chartId} 完全无法设置尺寸:`, fallbackError);
+                    hasValidSize = false;
+                  }
                 }
                 
                 if (!hasValidSize) {
@@ -271,7 +302,10 @@ const SinglePredictionPage = () => {
   // 从 Supabase 获取数据
   const getDataFromSupabase = async () => {
     try {
-      console.log('开始获取数据，SKU ID:', skuId, '日期:', date);
+      console.log('=== 开始获取数据 ===');
+      console.log('SKU ID:', skuId);
+      console.log('预测日期:', date);
+      console.log('预测步长:', predictionStep === 0 ? `自定义${customStep}天` : `${predictionStep}天`);
       
       // 获取历史价格数据
       const histResult = await supabaseClient
@@ -287,10 +321,11 @@ const SinglePredictionPage = () => {
       const historicalData = histResult.data || [];
       console.log('历史数据获取成功，条数:', historicalData.length);
 
-      // 获取预测数据
+      // 获取预测数据 - 修复日期联动问题
       const actualStep = predictionStep === 0 ? parseInt(customStep) : predictionStep;
-      console.log('查询预测数据，步长:', actualStep);
+      console.log('查询预测数据，预测日期:', date, '步长:', actualStep);
       
+      // 查询指定预测日期的所有预测结果
       const predResult = await supabaseClient
         .from('result')
         .select('*')
