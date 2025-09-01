@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import supabaseClient from '../utils/supabase';
 import dataProcessor from '../utils/dataProcessor';
 import chartUtils from '../utils/chartUtils';
+import { testDataConnection } from '../test-data';
 
 // 全局错误处理器，专门处理 getBoundingClientRect 错误
 const setupGlobalErrorHandler = () => {
@@ -506,7 +507,7 @@ const SinglePredictionPage = () => {
           </div>
             
           {/* 提交按钮 */}
-          <div className="form-control">
+          <div className="form-control space-y-3">
             <button
               onClick={handleQuery}
               className="w-full py-3 px-6 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -518,6 +519,24 @@ const SinglePredictionPage = () => {
                   预测中...
                 </>
               ) : '开始预测'}
+            </button>
+            
+            {/* 测试数据连接按钮 */}
+            <button
+              onClick={async () => {
+                console.log('开始测试数据连接...');
+                const result = await testDataConnection();
+                console.log('测试结果:', result);
+                if (result.error) {
+                  setError(`数据连接测试失败: ${result.error}`);
+                } else {
+                  console.log(`✅ 数据连接正常 - 历史数据: ${result.historyCount}条, 预测数据: ${result.predictionCount}条`);
+                  console.log('可用预测日期:', result.availableDates.slice(0, 5));
+                }
+              }}
+              className="w-full py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors"
+            >
+              🔍 测试数据连接
             </button>
           </div>
         </div>
