@@ -1,4 +1,4 @@
-import supabaseClient from './utils/supabase';
+import { supabase } from './lib/supabase';
 
 // 测试数据连接和查询
 export const testDataConnection = async () => {
@@ -7,7 +7,7 @@ export const testDataConnection = async () => {
     
     // 1. 测试历史数据查询
     console.log('1. 查询历史数据...');
-    const histResult = await supabaseClient
+    const histResult = await supabase
       .from('real')
       .select('*')
       .eq('sku_id', 'DEMO_SKU_001')
@@ -25,7 +25,7 @@ export const testDataConnection = async () => {
     
     // 2. 测试预测数据查询
     console.log('2. 查询预测数据...');
-    const predResult = await supabaseClient
+    const predResult = await supabase
       .from('result')
       .select('*')
       .eq('sku_id', 'DEMO_SKU_001')
@@ -43,7 +43,7 @@ export const testDataConnection = async () => {
     
     // 3. 查询可用的预测日期
     console.log('3. 查询可用的预测日期...');
-    const datesResult = await supabaseClient
+    const datesResult = await supabase
       .from('result')
       .select('prediction_date')
       .eq('sku_id', 'DEMO_SKU_001')

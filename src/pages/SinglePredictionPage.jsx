@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import supabaseClient from '../utils/supabase';
+import { supabase } from '../lib/supabase';
 import dataProcessor from '../utils/dataProcessor';
 import chartUtils from '../utils/chartUtils';
 import { testDataConnection } from '../test-data';
@@ -308,11 +308,19 @@ const SinglePredictionPage = () => {
       console.log('预测日期:', date);
       console.log('预测步长:', predictionStep === 0 ? `自定义${customStep}天` : `${predictionStep}天`);
       
-      // 获取历史价格数据
-      const histResult = await supabaseClient
+      // 获取历史价格数据 - 修复预测日期联动：截止到预测日期的前一日
+      const predictionDate = new Date(date);
+      const historyEndDate = new Date(predictionDate);
+      historyEndDate.setDate(historyEndDate.getDate() - 1); // 前一日
+      const historyEndDateStr = historyEndDate.toISOString().split('T')[0];
+      
+      console.log('历史数据查询范围: 截止到', historyEndDateStr, '(预测日期前一日)');
+      
+      const histResult = await supabase
         .from('real')
         .select('*')
         .eq('sku_id', skuId)
+        .lte('date', historyEndDateStr)
         .order('date', { ascending: true });
 
       if (histResult.error) {
@@ -327,7 +335,7 @@ const SinglePredictionPage = () => {
       console.log('查询预测数据，预测日期:', date, '步长:', actualStep);
       
       // 查询指定预测日期的所有预测结果
-      const predResult = await supabaseClient
+      const predResult = await supabase
         .from('result')
         .select('*')
         .eq('sku_id', skuId)
@@ -364,7 +372,7 @@ const SinglePredictionPage = () => {
         const targetDates = predictions.map(p => p.target_date).filter(Boolean);
         
         if (targetDates.length > 0) {
-          const futureResult = await supabaseClient
+          const futureResult = await supabase
             .from('real')
             .select('*')
             .eq('sku_id', skuId)
